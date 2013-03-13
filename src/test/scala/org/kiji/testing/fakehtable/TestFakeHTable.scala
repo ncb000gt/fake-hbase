@@ -23,6 +23,8 @@ import java.util.Arrays
 import scala.collection.JavaConverters.mapAsScalaMapConverter
 import scala.collection.JavaConverters._
 import org.apache.hadoop.hbase.HBaseConfiguration
+import org.apache.hadoop.hbase.client.RowMutations
+import org.apache.hadoop.hbase.client.Mutation
 import org.apache.hadoop.hbase.client.Delete
 import org.apache.hadoop.hbase.client.Get
 import org.apache.hadoop.hbase.client.HTableInterface
@@ -338,7 +340,7 @@ class TestFakeHTable extends FunSuite {
       expect("key2")(Bytes.toString(rows(1).getRow))
     }
     {
-      val scanner = table.getScanner(new Scan().setStartRow("key1a".getBytes))
+      val scanner = table.getScanner(new Scan().setStartRow("key1\0".getBytes))
       val rows = scanner.iterator().asScala.toList
       expect(1)(rows.size)
       expect("key2")(Bytes.toString(rows(0).getRow))
