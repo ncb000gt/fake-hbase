@@ -47,6 +47,7 @@ import org.apache.hadoop.hbase.HRegionLocation
 import org.apache.hadoop.hbase.HTableDescriptor
 import org.apache.hadoop.hbase.KeyValue
 import org.apache.hadoop.hbase.ServerName
+import org.apache.hadoop.hbase.client.Append
 import org.apache.hadoop.hbase.client.Delete
 import org.apache.hadoop.hbase.client.Get
 import org.apache.hadoop.hbase.client.HTableInterface
@@ -56,6 +57,8 @@ import org.apache.hadoop.hbase.client.Result
 import org.apache.hadoop.hbase.client.ResultScanner
 import org.apache.hadoop.hbase.client.Row
 import org.apache.hadoop.hbase.client.RowLock
+import org.apache.hadoop.hbase.client.RowMutations
+import org.apache.hadoop.hbase.client.Mutation
 import org.apache.hadoop.hbase.client.Scan
 import org.apache.hadoop.hbase.client.coprocessor.Batch
 import org.apache.hadoop.hbase.filter.Filter
@@ -122,17 +125,50 @@ class FakeHTable(
     return desc
   }
 
+  override def append(append: Append): Result = {
+    synchronized {
+      val nowMS = System.currentTimeMillis
+
+      val rowKey = append.getRow
+      val rowFamilyMap = rows.asScala
+        .getOrElseUpdate(rowKey, new JTreeMap[Bytes, FamilyQualifiers](Bytes.BYTES_COMPARATOR))
+        for ((family, kvs) <- append.getFamilyMap.asScala) {
+          val rowQualifierMap = rowFamilyMap.asScala
+            .getOrElseUpdate(family, new JTreeMap[Bytes, ColumnSeries](Bytes.BYTES_COMPARATOR))
+
+            for (kv <- kvs.asScala) {
+              require(family.toSeq == kv.getFamily.toSeq)
+
+              val column = rowQualifierMap.asScala
+                .getOrElseUpdate(kv.getQualifier, new JTreeMap[Long, Bytes](TimestampComparator))
+
+                val timestamp = {
+                  if (kv.getTimestamp == HConstants.LATEST_TIMESTAMP) {
+                    nowMS
+                  } else {
+                    kv.getTimestamp
+                  }
+                }
+
+              column.put(timestamp, kv.getValue)
+            }
+        }
+    }
+
+    return null;
+  }
+
   override def exists(get: Get): Boolean = {
     return !this.get(get).isEmpty()
   }
 
-  override def batch(actions: JList[Row], results: Array[Object]): Unit = {
+  override def batch(actions: JList[_ <: Row], results: Array[Object]): Unit = {
     require(results.size == actions.size)
     val array = batch(actions)
     System.arraycopy(array, 0, results, 0, results.length)
   }
 
-  override def batch(actions: JList[Row]): Array[Object] = {
+  override def batch(actions: JList[_ <: Row]): Array[Object] = {
     val results = Buffer[Object]()
     actions.asScala.foreach { action =>
       action match {
@@ -239,6 +275,18 @@ class FakeHTable(
 
   override def put(put: JList[Put]): Unit = {
     put.asScala.foreach(this.put(_))
+  }
+
+  def handleMutation(mutation: Mutation): Unit = {
+    mutation match {
+      case put: Put => this.put(put)
+      case delete: Delete => this.delete(delete)
+      case _ => throw new ClassCastException
+    }
+  }
+
+  override def mutateRow(rowMutation: RowMutations): Unit = {
+    rowMutation.getMutations().asScala.foreach(this.handleMutation(_))
   }
 
   /**
@@ -499,10 +547,12 @@ class FakeHTable(
     this.closed = true
   }
 
+  @deprecated(message="{@link RowLock} and associated operations are deprecated", since="")
   override def lockRow(row: Bytes): RowLock = {
     sys.error("Not implemented")
   }
 
+  @deprecated(message="{@link RowLock} and associated operations are deprecated", since="")
   override def unlockRow(lock: RowLock): Unit = {
     sys.error("Not implemented")
   }
@@ -776,7 +826,7 @@ class FakeHTable(
       } else if (scan.getStartRow.isEmpty) {
         rows.firstKey
       } else {
-        rows.ceilingKey(scan.getStartRow)
+        rows.floorKey(scan.getStartRow)
       }
     }
     if (!scan.getStopRow.isEmpty

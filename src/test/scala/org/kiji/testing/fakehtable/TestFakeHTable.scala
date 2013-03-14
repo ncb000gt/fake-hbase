@@ -28,6 +28,7 @@ import org.apache.hadoop.hbase.client.Mutation
 import org.apache.hadoop.hbase.client.Delete
 import org.apache.hadoop.hbase.client.Get
 import org.apache.hadoop.hbase.client.HTableInterface
+import org.apache.hadoop.hbase.client.Append
 import org.apache.hadoop.hbase.client.Put
 import org.apache.hadoop.hbase.client.Scan
 import org.apache.hadoop.hbase.filter.KeyOnlyFilter
@@ -71,6 +72,29 @@ class TestFakeHTable extends FunSuite {
         new String(result.getMap.get("family".getBytes).get("qualifier".getBytes).get(12345L)))
   }
 
+  test("HTable.put(row) then HTable.append(append) then HTable.get(row)") {
+    val table = new FakeHTable(name = "table", desc = null)
+    table.put(new Put("key".getBytes)
+        .add("family".getBytes, "qualifier".getBytes, 12345L, "value".getBytes))
+
+    table.append(new Append("key".getBytes)
+        .add("family".getBytes, "qualifier2".getBytes, "value2".getBytes))
+
+    val result = table.get(new Get("key".getBytes))
+    expect(false)(result.isEmpty)
+    expect("key")(new String(result.getRow))
+    expect("value")(new String(result.value))
+
+    expect(1)(result.getMap.size)
+    expect(2)(result.getMap.get("family".getBytes).size)
+    expect(1)(result.getMap.get("family".getBytes).get("qualifier".getBytes).size)
+    expect("value")(
+        new String(result.getMap.get("family".getBytes).get("qualifier".getBytes).get(12345L)))
+    expect(1)(result.getMap.get("family".getBytes).get("qualifier2".getBytes).size)
+    result.getMap.get("family".getBytes).get("qualifier2".getBytes).asScala.foreach{ case (_, v) => expect("value2")(new
+    String(v)); }
+  }
+
   test("HTable.put(row) then HTable.scan(family)") {
     val table = new FakeHTable(name = "table", desc = null)
     table.put(new Put("key".getBytes)
@@ -99,6 +123,16 @@ class TestFakeHTable extends FunSuite {
         .add("family".getBytes, "qualifier".getBytes, 12345L, "value".getBytes))
 
     table.delete(new Delete("key".getBytes))
+    expect(true)(table.get(new Get("key".getBytes)).isEmpty)
+  }
+
+  test("HTable.mutate() - add/delete") {
+    val table = new FakeHTable(name = "table", desc = null)
+    val mutations = new RowMutations("key".getBytes)
+    mutations.add(new Put("key".getBytes)
+        .add("family".getBytes, "qualifier".getBytes, 12345L, "value".getBytes))
+    mutations.add(new Delete("key".getBytes))
+    table.mutateRow(mutations)
     expect(true)(table.get(new Get("key".getBytes)).isEmpty)
   }
 
@@ -340,8 +374,9 @@ class TestFakeHTable extends FunSuite {
       expect("key2")(Bytes.toString(rows(1).getRow))
     }
     {
-      val scanner = table.getScanner(new Scan().setStartRow("key1\0".getBytes))
+      val scanner = table.getScanner(new Scan().setStartRow("key2".getBytes))
       val rows = scanner.iterator().asScala.toList
+      rows.foreach{ case row => println(Bytes.toString(row.getRow)) }
       expect(1)(rows.size)
       expect("key2")(Bytes.toString(rows(0).getRow))
     }

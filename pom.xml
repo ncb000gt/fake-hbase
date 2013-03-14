@@ -61,6 +61,10 @@
     </plugins>
   </build>
 
+	<properties>
+		<hbase.version>0.94.5</hbase.version>
+	</properties>
+
   <dependencies>
     <!-- Scala runtime -->
     <dependency>
